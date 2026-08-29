@@ -76,20 +76,32 @@ export class OperationSeries {
   private growUntil(tMs: number): void {
     // Weighted so movement is picked far more often than staying put --- an
     // expected path that mostly holds still doesn't give the player enough
-    // to actually react to.
+    // to actually react to. On top of that, staying is banned outright once
+    // it's just happened MAX_CONSECUTIVE_STAYS times in a row, so a long
+    // still stretch can never happen purely by unlucky rolls.
     const STAY_WEIGHT = 1;
     const MOVE_WEIGHT = 3;
+    const MAX_CONSECUTIVE_STAYS = 3;
     while (this.totalMs <= tMs) {
       const lastLane = this.segments[this.segments.length - 1].lane;
       const moves: number[] = [];
       if (lastLane > 0) moves.push(lastLane - 1);
       if (lastLane < this.config.laneCount - 1) moves.push(lastLane + 1);
+      const canStay = this.trailingStayStreak() < MAX_CONSECUTIVE_STAYS;
       const options = [
-        ...Array(STAY_WEIGHT).fill(lastLane),
+        ...(canStay ? Array(STAY_WEIGHT).fill(lastLane) : []),
         ...moves.flatMap((lane) => Array(MOVE_WEIGHT).fill(lane)),
       ];
       this.append(options[Math.floor(this.rng() * options.length)]);
     }
+  }
+
+  /** How many segments in a row (most recent first) have repeated the same lane. */
+  private trailingStayStreak(): number {
+    const lane = this.segments[this.segments.length - 1].lane;
+    let streak = 0;
+    for (let i = this.segments.length - 2; i >= 0 && this.segments[i].lane === lane; i--) streak++;
+    return streak;
   }
 
   private append(lane: number): void {
