@@ -74,11 +74,20 @@ export class OperationSeries {
   }
 
   private growUntil(tMs: number): void {
+    // Weighted so movement is picked far more often than staying put --- an
+    // expected path that mostly holds still doesn't give the player enough
+    // to actually react to.
+    const STAY_WEIGHT = 1;
+    const MOVE_WEIGHT = 3;
     while (this.totalMs <= tMs) {
       const lastLane = this.segments[this.segments.length - 1].lane;
-      const options = [lastLane];
-      if (lastLane > 0) options.push(lastLane - 1);
-      if (lastLane < this.config.laneCount - 1) options.push(lastLane + 1);
+      const moves: number[] = [];
+      if (lastLane > 0) moves.push(lastLane - 1);
+      if (lastLane < this.config.laneCount - 1) moves.push(lastLane + 1);
+      const options = [
+        ...Array(STAY_WEIGHT).fill(lastLane),
+        ...moves.flatMap((lane) => Array(MOVE_WEIGHT).fill(lane)),
+      ];
       this.append(options[Math.floor(this.rng() * options.length)]);
     }
   }
