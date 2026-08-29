@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { generateBatch } from "../src/game/spawner.ts";
+import { OperationSeries } from "../src/game/path.ts";
+import { rowLanes } from "../src/game/spawner.ts";
 import { LANE_COUNT } from "../src/game/types.ts";
 
 // This week's spec: https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/crits/05-game/
@@ -14,11 +15,14 @@ import { LANE_COUNT } from "../src/game/types.ts";
 // - "it teaches itself: no instructions anywhere, on screen or off" ---
 //   checked against the shipped markup.
 // - "one rule of the game has a focused automated test" --- this game's rule
-//   is that a batch of oncoming cars always leaves at least one lane open;
-//   `generateBatch` (src/game/spawner.ts) is the sole place that's enforced.
-//   Collision itself stays verified by playing, per the brief's own framing:
-//   a test can establish that a collision ends the round, only playing can
-//   tell you whether it feels fair.
+//   is that traffic is generated *from* a pre-generated, guaranteed-reachable
+//   safe path (the "expected operation series", src/game/path.ts) rather than
+//   generated first and hoped to leave an opening: `rowLanes`
+//   (src/game/spawner.ts) never blocks whatever lane the series names safe,
+//   and `OperationSeries.laneAt` never demands an unreachable jump. Collision
+//   itself stays verified by playing, per the brief's own framing: a test can
+//   establish that a collision ends the round, only playing can tell you
+//   whether it feels fair.
 const DIST = resolve("dist");
 const doc = new JSDOM(readFileSync(join(DIST, "index.html"), "utf8")).window.document;
 
@@ -42,18 +46,67 @@ describe("crit 5: no instructions anywhere on screen", () => {
   });
 });
 
-describe("crit 5: a batch of cars always leaves a lane open", () => {
-  it("never blocks every lane, across densities and many random draws", () => {
+describe("crit 5: traffic never blocks the expected safe lane", () => {
+  it("never blocks the safe lane, across densities, every lane, and many random draws", () => {
     for (const density of [0, 0.25, 0.5, 0.75, 1, 1.5]) {
-      for (let i = 0; i < 200; i++) {
-        const batch = generateBatch(LANE_COUNT, density);
-        expect(batch.some((blocked) => !blocked)).toBe(true);
+      for (let safeLane = 0; safeLane < LANE_COUNT; safeLane++) {
+        for (let i = 0; i < 50; i++) {
+          const row = rowLanes(LANE_COUNT, safeLane, density);
+          expect(row[safeLane]).toBe(false);
+        }
       }
     }
   });
 
-  it("never blocks every lane even with a rigged rng that always rolls blocked", () => {
-    const batch = generateBatch(LANE_COUNT, 1, () => 0);
-    expect(batch.some((blocked) => !blocked)).toBe(true);
+  it("never blocks the safe lane even with a rigged rng that always rolls blocked", () => {
+    for (let safeLane = 0; safeLane < LANE_COUNT; safeLane++) {
+      const row = rowLanes(LANE_COUNT, safeLane, 1, () => 0);
+      expect(row[safeLane]).toBe(false);
+    }
+  });
+});
+
+describe("crit 5: the expected operation series is always reachable", () => {
+  it("only ever moves one lane at a time and stays on the road", () => {
+    const startLane = Math.floor(LANE_COUNT / 2);
+    const series = new OperationSeries(startLane, {
+      laneCount: LANE_COUNT,
+      minHoldMs: 200,
+      maxHoldMs: 400,
+    });
+
+    let previousLane = startLane;
+    for (let t = 0; t < 60_000; t += 50) {
+      const lane = series.laneAt(t);
+      expect(lane).toBeGreaterThanOrEqual(0);
+      expect(lane).toBeLessThan(LANE_COUNT);
+      expect(Math.abs(lane - previousLane)).toBeLessThanOrEqual(1);
+      previousLane = lane;
+    }
+  });
+
+  it("stableLaneAt never disagrees between two arrivals close enough to collide", () => {
+    // Rows this close together in arrival time can have overlapping
+    // collision windows at the player's row (see engine.ts's spawnRow); if
+    // stableLaneAt returned non-null for both but named different lanes,
+    // neither lane would actually be safe against both rows at once.
+    const marginMs = 625;
+    const series = new OperationSeries(Math.floor(LANE_COUNT / 2), {
+      laneCount: LANE_COUNT,
+      minHoldMs: 2200,
+      maxHoldMs: 3400,
+    });
+
+    const samples: { t: number; lane: number }[] = [];
+    for (let t = 0; t < 120_000; t += 420) {
+      const lane = series.stableLaneAt(t, marginMs);
+      if (lane !== null) samples.push({ t, lane });
+    }
+
+    for (let i = 1; i < samples.length; i++) {
+      if (samples[i].t - samples[i - 1].t < 2 * marginMs) {
+        expect(samples[i].lane).toBe(samples[i - 1].lane);
+      }
+    }
   });
 });

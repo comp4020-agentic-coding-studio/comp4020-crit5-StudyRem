@@ -1,25 +1,24 @@
-// The one rule this game depends on: a batch of oncoming cars must always
-// leave at least one lane the player can be in. `generateBatch` is the sole
-// place that guarantee is enforced, so it's the one function with a focused
-// automated test (see spec/crit-5.test.ts).
+// The one rule this game depends on: a row of oncoming traffic must never
+// occupy the lane the expected operation series (see path.ts) has marked
+// safe for that row's arrival time. `rowLanes` is the sole place that
+// guarantee is enforced, so it's the one function with a focused automated
+// test (see spec/crit-5.test.ts).
 
 /**
- * Returns which lanes a batch occupies (`true` = blocked). `density` is a
- * 0..1 tunable (clamped) controlling how many lanes a batch tries to block;
- * regardless of density, at least one lane is always left open.
+ * Returns which lanes a row of traffic occupies (`true` = blocked), given a
+ * known-safe lane that must always stay open. `density` is a 0..1 tunable
+ * (clamped) controlling how often every *other* lane gets a car --- it can
+ * be as high as 1 (fully block every other lane) since the safe lane is
+ * left open by construction, not by chance.
  */
-export function generateBatch(
+export function rowLanes(
   laneCount: number,
+  safeLane: number,
   density: number,
   rng: () => number = Math.random,
 ): boolean[] {
   const clampedDensity = Math.min(1, Math.max(0, density));
-  const blocked = Array.from({ length: laneCount }, () => rng() < clampedDensity);
-
-  if (blocked.every(Boolean)) {
-    const openLane = Math.floor(rng() * laneCount);
-    blocked[openLane] = false;
-  }
-
-  return blocked;
+  return Array.from({ length: laneCount }, (_, lane) =>
+    lane === safeLane ? false : rng() < clampedDensity,
+  );
 }

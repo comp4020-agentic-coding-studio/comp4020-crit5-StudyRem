@@ -34,25 +34,23 @@ export interface Car {
 }
 
 export interface SpawnerConfig {
-  /** 0..1, fraction of lanes a wave tries to block. Never blocks every lane. */
+  /** 0..1, chance a given non-safe lane gets a car in a given row. Can be 1
+   *  (fully block every other lane) since the expected operation series
+   *  guarantees a lane is always left open regardless. */
   density: number;
   /** Pixels per second oncoming cars travel down the screen. */
   carSpeed: number;
-  /** Milliseconds to wait after a batch's cars fully clear before the next batch. */
-  batchGapMs: number;
-  /** Milliseconds between mini-waves within a single batch. */
-  waveGapMs: number;
-  /** Minimum number of mini-waves fired per batch. */
-  minWavesPerBatch: number;
-  /** Maximum number of mini-waves fired per batch. */
-  maxWavesPerBatch: number;
+  /** Milliseconds between spawned rows of traffic. */
+  rowIntervalMs: number;
+  /** Minimum/maximum milliseconds the expected path holds a lane before considering a move. */
+  minHoldMs: number;
+  maxHoldMs: number;
 }
 
 export const DEFAULT_SPAWNER_CONFIG: SpawnerConfig = {
-  density: 0.6,
+  density: 0.85,
   carSpeed: 220,
-  batchGapMs: 550,
-  waveGapMs: 350,
-  minWavesPerBatch: 2,
-  maxWavesPerBatch: 3,
+  rowIntervalMs: 420,
+  minHoldMs: 2200,
+  maxHoldMs: 3400,
 };

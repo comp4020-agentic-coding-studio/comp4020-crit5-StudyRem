@@ -1,5 +1,6 @@
 import { boxAt, isColliding, playerX as continuousPlayerX } from "./collision.ts";
-import { generateBatch } from "./spawner.ts";
+import { OperationSeries } from "./path.ts";
+import { rowLanes } from "./spawner.ts";
 import {
   CAR_HEIGHT,
   DEFAULT_SPAWNER_CONFIG,
@@ -46,7 +47,7 @@ export interface EngineSnapshot {
 /**
  * The full game state machine: start -> intro -> playing -> gameover, and
  * back to intro on restart. Owns lane movement (with the buffered pre-input
- * window), batch/gap scheduling, and collision --- everything except drawing
+ * window), traffic scheduling, and collision --- everything except drawing
  * and DOM/input wiring, which live in render.ts and input.ts.
  */
 export class Engine {
@@ -60,10 +61,8 @@ export class Engine {
 
   private cars: Car[] = [];
   private nextCarId = 0;
-  private batchState: "gap" | "spawning" | "clearing" = "gap";
-  private gapRemainingMs = 0;
-  private wavesRemainingInBatch = 0;
-  private waveGapRemainingMs = 0;
+  private operationSeries!: OperationSeries;
+  private rowRemainingMs = 0;
 
   private elapsedPlayMs = 0;
   private score = 0;
@@ -84,10 +83,7 @@ export class Engine {
     this.transition = null;
     this.bufferedInput = null;
     this.cars = [];
-    this.batchState = "gap";
-    this.gapRemainingMs = 0;
-    this.wavesRemainingInBatch = 0;
-    this.waveGapRemainingMs = 0;
+    this.rowRemainingMs = 0;
     this.elapsedPlayMs = 0;
     this.score = 0;
     this.explosion = null;
@@ -148,7 +144,7 @@ export class Engine {
       return;
     }
 
-    this.advanceBatchSchedule(dtMs);
+    this.advanceRowSchedule(dtMs);
   }
 
   private updateIntro(dtMs: number): void {
@@ -161,11 +157,15 @@ export class Engine {
     if (t >= 1) {
       this.state = "playing";
       this.elapsedPlayMs = 0;
-      // A brief gap before the first batch, matching the gap between every
-      // later batch --- a safe window to try the controls before any
-      // traffic exists, not just a wordless arrival.
-      this.batchState = "gap";
-      this.gapRemainingMs = this.config.batchGapMs;
+      this.operationSeries = new OperationSeries(this.currentLane, {
+        laneCount: LANE_COUNT,
+        minHoldMs: this.config.minHoldMs,
+        maxHoldMs: this.config.maxHoldMs,
+      });
+      // First row spawns immediately --- the travel time from spawn to the
+      // player's row (several seconds at the default carSpeed) is itself the
+      // safe window to try the controls before traffic arrives.
+      this.rowRemainingMs = 0;
     }
   }
 
@@ -190,6 +190,7 @@ export class Engine {
   private advanceCars(dtMs: number): void {
     const distance = (this.config.carSpeed * dtMs) / 1000;
     for (const car of this.cars) car.y += distance;
+    this.cars = this.cars.filter((car) => car.y - CAR_HEIGHT / 2 <= GAME_HEIGHT);
   }
 
   private findCollision(): Car | null {
@@ -202,57 +203,48 @@ export class Engine {
     return null;
   }
 
-  private advanceBatchSchedule(dtMs: number): void {
-    if (this.batchState === "gap") {
-      this.gapRemainingMs -= dtMs;
-      if (this.gapRemainingMs <= 0) this.beginBatch();
-      return;
-    }
-
-    if (this.batchState === "spawning") {
-      this.waveGapRemainingMs -= dtMs;
-      if (this.waveGapRemainingMs <= 0) this.fireNextWave();
-      return;
-    }
-
-    // "clearing": every wave in this batch has spawned; wait for all of the
-    // batch's cars --- possibly from several overlapping waves --- to pass
-    // off-screen before starting the longer gap to the next batch.
-    const cleared = this.cars.every((car) => car.y - CAR_HEIGHT / 2 > GAME_HEIGHT);
-    if (cleared) {
-      this.cars = [];
-      this.batchState = "gap";
-      this.gapRemainingMs = this.config.batchGapMs;
+  private advanceRowSchedule(dtMs: number): void {
+    this.rowRemainingMs -= dtMs;
+    if (this.rowRemainingMs <= 0) {
+      this.spawnRow();
+      this.rowRemainingMs = this.config.rowIntervalMs;
     }
   }
 
   /**
-   * Starts a new batch: 2-3 mini-waves fired in quick succession, each its
-   * own independently-generated set of blocked lanes. Later waves fire
-   * without waiting for earlier ones to clear the screen --- that overlap is
-   * what makes cars in different lanes arrive at different times, instead of
-   * one synchronized wall of cars.
+   * Spawns one row of traffic. The lane that must stay open isn't chosen
+   * here --- it's read off the expected operation series (path.ts) at the
+   * time this row will actually reach the player, so traffic is generated
+   * *from* a guaranteed-solvable path rather than generated first and hoped
+   * to leave an opening.
+   *
+   * A row's arrival must stay a margin away from the *edges* of the segment
+   * it falls in, for two separate reasons:
+   *
+   * - Each car's box overlaps the player's row for roughly
+   *   `2 * CAR_HEIGHT / carSpeed` around its own arrival instant, wider than
+   *   the gap between rows --- so without a margin at least that wide, a row
+   *   could still be overlapping the player when an adjacent, differently
+   *   safe segment's row arrives too, and neither lane would be safe against
+   *   both at once.
+   * - The player's box is narrower than a lane but wider than half the gap
+   *   between lane centers, so mid-transition it briefly overlaps *both*
+   *   the lane it's leaving and the one it's entering. A row that starts
+   *   blocking the just-left lane can't be allowed to reach collision range
+   *   before the transition (`TRANSITION_DURATION_MS`) has actually
+   *   finished, or it can hit a player who did everything right.
+   *
+   * Rows whose arrival is too close to a lane change are skipped (a brief
+   * quiet gap in traffic right as the safe lane changes) rather than
+   * spawned against an ambiguous or not-yet-vacated lane.
    */
-  private beginBatch(): void {
-    const { minWavesPerBatch, maxWavesPerBatch } = this.config;
-    const span = maxWavesPerBatch - minWavesPerBatch + 1;
-    this.wavesRemainingInBatch = minWavesPerBatch + Math.floor(Math.random() * span);
-    this.batchState = "spawning";
-    this.fireNextWave();
-  }
-
-  private fireNextWave(): void {
-    this.spawnWave();
-    this.wavesRemainingInBatch--;
-    if (this.wavesRemainingInBatch <= 0) {
-      this.batchState = "clearing";
-    } else {
-      this.waveGapRemainingMs = this.config.waveGapMs;
-    }
-  }
-
-  private spawnWave(): void {
-    const blocked = generateBatch(LANE_COUNT, this.config.density);
+  private spawnRow(): void {
+    const travelMs = ((PLAYER_REST_Y + CAR_HEIGHT) / this.config.carSpeed) * 1000;
+    const halfWindowMs = (CAR_HEIGHT / this.config.carSpeed) * 1000;
+    const marginMs = halfWindowMs + TRANSITION_DURATION_MS + 100;
+    const safeLane = this.operationSeries.stableLaneAt(this.elapsedPlayMs + travelMs, marginMs);
+    if (safeLane === null) return;
+    const blocked = rowLanes(LANE_COUNT, safeLane, this.config.density);
     this.cars.push(
       ...blocked.flatMap((isBlocked, lane) =>
         isBlocked ? [{ id: this.nextCarId++, lane, y: -CAR_HEIGHT }] : [],
