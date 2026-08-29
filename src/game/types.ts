@@ -33,6 +33,16 @@ export interface Car {
   y: number;
 }
 
+export interface Bonus {
+  id: number;
+  lane: number;
+  y: number;
+}
+
+/** Collision/draw box for a bonus --- smaller than a car so catching one takes some precision. */
+export const BONUS_SIZE = 34;
+export const BONUS_POINTS = 25;
+
 export interface SpawnerConfig {
   /** Pixels per second oncoming cars travel down the screen. */
   carSpeed: number;

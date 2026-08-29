@@ -1,5 +1,6 @@
 import type { EngineSnapshot } from "./engine.ts";
 import {
+  BONUS_SIZE,
   CAR_HEIGHT,
   CAR_WIDTH,
   GAME_HEIGHT,
@@ -15,6 +16,8 @@ const EDGE_COLOR = "#4a5058";
 const LANE_LINE_COLOR = "#5c636c";
 const PLAYER_COLOR = "#e0342f";
 const CAR_COLOR = "#8a8f96";
+const BONUS_COLOR = "#ffd43b";
+const BONUS_HIGHLIGHT_COLOR = "#fff3b0";
 
 function roundedCar(ctx: CanvasRenderingContext2D, centerX: number, centerY: number, color: string): void {
   const x = centerX - CAR_WIDTH / 2;
@@ -23,6 +26,24 @@ function roundedCar(ctx: CanvasRenderingContext2D, centerX: number, centerY: num
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.roundRect(x, y, CAR_WIDTH, CAR_HEIGHT, radius);
+  ctx.fill();
+}
+
+function drawBonus(ctx: CanvasRenderingContext2D, centerX: number, centerY: number): void {
+  const radius = BONUS_SIZE / 2;
+  const gradient = ctx.createRadialGradient(
+    centerX,
+    centerY - radius * 0.3,
+    radius * 0.1,
+    centerX,
+    centerY,
+    radius,
+  );
+  gradient.addColorStop(0, BONUS_HIGHLIGHT_COLOR);
+  gradient.addColorStop(1, BONUS_COLOR);
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -76,6 +97,10 @@ export function drawFrame(ctx: CanvasRenderingContext2D, snapshot: EngineSnapsho
 
   for (const car of snapshot.cars) {
     roundedCar(ctx, laneCenterX(car.lane), car.y, CAR_COLOR);
+  }
+
+  for (const bonus of snapshot.bonuses) {
+    drawBonus(ctx, laneCenterX(bonus.lane), bonus.y);
   }
 
   if (snapshot.state !== "start" && snapshot.playerAlive) {

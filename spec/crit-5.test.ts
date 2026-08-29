@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { OperationSeries } from "../src/game/path.ts";
-import { canSpawnInLane } from "../src/game/spawner.ts";
+import { canSpawnInLane, pickBonusLane } from "../src/game/spawner.ts";
 import { LANE_COUNT } from "../src/game/types.ts";
 
 // This week's spec: https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/crits/05-game/
@@ -55,6 +55,19 @@ describe("crit 5: a car never spawns in a lane the expected path needs safe", ()
         const safe = a === b ? [a] : [a, b];
         for (let lane = 0; lane < LANE_COUNT; lane++) {
           expect(canSpawnInLane(lane, safe)).toBe(!safe.includes(lane));
+        }
+      }
+    }
+  });
+});
+
+describe("crit 5: a bonus never spawns in a lane that isn't safe for cars too", () => {
+  it("always returns a member of the safe set, across every safe-set size and rng roll", () => {
+    for (let a = 0; a < LANE_COUNT; a++) {
+      for (let b = 0; b < LANE_COUNT; b++) {
+        const safe = a === b ? [a] : [a, b];
+        for (const roll of [0, 0.25, 0.5, 0.75, 0.999]) {
+          expect(safe.includes(pickBonusLane(safe, () => roll))).toBe(true);
         }
       }
     }

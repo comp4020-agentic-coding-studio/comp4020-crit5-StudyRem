@@ -15,3 +15,12 @@
 export function canSpawnInLane(lane: number, safeLanes: readonly number[]): boolean {
   return !safeLanes.includes(lane);
 }
+
+/**
+ * Picks the lane a bonus pickup spawns in, out of that same known-safe set
+ * --- so a bonus is always placed where `canSpawnInLane` already guarantees
+ * no car can ever legally arrive, with no separate safety argument needed.
+ */
+export function pickBonusLane(safeLanes: readonly number[], rng: () => number = Math.random): number {
+  return safeLanes[Math.floor(rng() * safeLanes.length)];
+}

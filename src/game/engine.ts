@@ -1,13 +1,16 @@
-import { boxAt, isColliding, playerX as continuousPlayerX } from "./collision.ts";
+import { boxAt, isColliding, playerX as continuousPlayerX, squareBoxAt } from "./collision.ts";
 import { OperationSeries } from "./path.ts";
-import { canSpawnInLane } from "./spawner.ts";
+import { canSpawnInLane, pickBonusLane } from "./spawner.ts";
 import {
+  BONUS_POINTS,
+  BONUS_SIZE,
   CAR_HEIGHT,
   DEFAULT_SPAWNER_CONFIG,
   GAME_HEIGHT,
   LANE_COUNT,
   PLAYER_REST_Y,
   laneCenterX,
+  type Bonus,
   type Car,
   type GameState,
   type SpawnerConfig,
@@ -48,6 +51,7 @@ export interface EngineSnapshot {
   /** Whether the player is currently visible (hidden once it has crashed). */
   playerAlive: boolean;
   cars: Car[];
+  bonuses: Bonus[];
   explosion: Explosion | null;
   score: number;
 }
@@ -79,6 +83,16 @@ export class Engine {
   private laneRemainingMs: number[] = [];
   private lastSpawnAtMs = -Infinity;
 
+  // A bonus always spawns in a lane drawn from the same union safe-lane set
+  // that bars cars (see unionSafeLanesAt) --- so collecting one is always
+  // safe by the identical guarantee already proven for traffic, and never
+  // needs a case of its own. At most one is ever on screen at a time, so
+  // it stays a clear, legible target instead of clutter.
+  private bonuses: Bonus[] = [];
+  private nextBonusId = 0;
+  private bonusRemainingMs = 0;
+  private bonusPoints = 0;
+
   private elapsedPlayMs = 0;
   private score = 0;
   private explosion: Explosion | null = null;
@@ -98,6 +112,8 @@ export class Engine {
     this.transition = null;
     this.bufferedInput = null;
     this.cars = [];
+    this.bonuses = [];
+    this.bonusPoints = 0;
     this.elapsedPlayMs = 0;
     this.score = 0;
     this.explosion = null;
@@ -152,6 +168,9 @@ export class Engine {
     this.elapsedPlayMs += dtMs;
     this.advanceTransition(dtMs);
     this.advanceCars(dtMs);
+    this.advanceBonuses(dtMs);
+    this.collectBonuses();
+    this.score = Math.floor(this.elapsedPlayMs / 1000) + this.bonusPoints;
 
     const hitCar = this.findCollision();
     if (hitCar) {
@@ -160,6 +179,7 @@ export class Engine {
     }
 
     this.advanceSpawnSchedule(dtMs);
+    this.advanceBonusSchedule(dtMs);
   }
 
   private updateIntro(dtMs: number): void {
@@ -186,6 +206,7 @@ export class Engine {
       // first attempt in sync either.
       this.laneRemainingMs = Array.from({ length: LANE_COUNT }, () => this.randomSpawnGapMs());
       this.lastSpawnAtMs = -Infinity;
+      this.bonusRemainingMs = this.randomBonusGapMs();
     }
   }
 
@@ -213,6 +234,12 @@ export class Engine {
     this.cars = this.cars.filter((car) => car.y - CAR_HEIGHT / 2 <= GAME_HEIGHT);
   }
 
+  private advanceBonuses(dtMs: number): void {
+    const distance = (this.config.carSpeed * dtMs) / 1000;
+    for (const bonus of this.bonuses) bonus.y += distance;
+    this.bonuses = this.bonuses.filter((bonus) => bonus.y - BONUS_SIZE / 2 <= GAME_HEIGHT);
+  }
+
   private findCollision(): Car | null {
     const { x, y } = this.currentPlayerPosition();
     const playerBox = boxAt(x, y);
@@ -221,6 +248,18 @@ export class Engine {
       if (isColliding(playerBox, carBox)) return car;
     }
     return null;
+  }
+
+  /** Missing a bonus (it scrolls past uncollected) costs nothing --- just a missed opportunity. */
+  private collectBonuses(): void {
+    const { x, y } = this.currentPlayerPosition();
+    const playerBox = boxAt(x, y);
+    this.bonuses = this.bonuses.filter((bonus) => {
+      const bonusBox = squareBoxAt(laneCenterX(bonus.lane), bonus.y, BONUS_SIZE);
+      if (!isColliding(playerBox, bonusBox)) return true;
+      this.bonusPoints += BONUS_POINTS;
+      return false;
+    });
   }
 
   /**
@@ -268,19 +307,61 @@ export class Engine {
    * none of it was actually scheduled together.
    */
   private trySpawn(lane: number): void {
-    const travelMs = ((PLAYER_REST_Y + CAR_HEIGHT) / this.config.carSpeed) * 1000;
-    const halfWindowMs = (CAR_HEIGHT / this.config.carSpeed) * 1000;
-    const marginMs = halfWindowMs + TRANSITION_DURATION_MS + 100;
-    const safeLanes = this.paths.flatMap((path) => path.safeLanesAt(this.elapsedPlayMs + travelMs, marginMs));
+    const { travelMs, marginMs } = this.arrivalWindow();
+    const safeLanes = this.unionSafeLanesAt(this.elapsedPlayMs + travelMs, marginMs);
     if (!canSpawnInLane(lane, safeLanes)) return;
     if (this.elapsedPlayMs - this.lastSpawnAtMs < MIN_GLOBAL_SPAWN_GAP_MS) return;
     this.cars.push({ id: this.nextCarId++, lane, y: -CAR_HEIGHT });
     this.lastSpawnAtMs = this.elapsedPlayMs;
   }
 
+  /**
+   * A bonus is placed in one lane picked at random from that same union
+   * safe-lane set --- the exact set `trySpawn` bars cars from at their own
+   * arrival time --- so it's guaranteed collision-free by the identical
+   * guarantee already proven for traffic, with no separate safety argument
+   * needed. The set is never empty: each path always holds some lane safe.
+   */
+  private trySpawnBonus(): void {
+    const { travelMs, marginMs } = this.arrivalWindow();
+    const safeLanes = this.unionSafeLanesAt(this.elapsedPlayMs + travelMs, marginMs);
+    const lane = pickBonusLane(safeLanes);
+    this.bonuses.push({ id: this.nextBonusId++, lane, y: -BONUS_SIZE });
+  }
+
+  /** The union of both expected paths' safe lanes at `tMs` --- see trySpawn. */
+  private unionSafeLanesAt(tMs: number, marginMs: number): number[] {
+    return this.paths.flatMap((path) => path.safeLanesAt(tMs, marginMs));
+  }
+
+  private arrivalWindow(): { travelMs: number; marginMs: number } {
+    const travelMs = ((PLAYER_REST_Y + CAR_HEIGHT) / this.config.carSpeed) * 1000;
+    const halfWindowMs = (CAR_HEIGHT / this.config.carSpeed) * 1000;
+    const marginMs = halfWindowMs + TRANSITION_DURATION_MS + 100;
+    return { travelMs, marginMs };
+  }
+
   private randomSpawnGapMs(): number {
     const { minSpawnGapMs, maxSpawnGapMs } = this.config;
     return minSpawnGapMs + Math.random() * (maxSpawnGapMs - minSpawnGapMs);
+  }
+
+  /**
+   * One lane runs its own countdown to the next bonus attempt, same idea as
+   * `advanceSpawnSchedule` --- but only one bonus is ever allowed on screen
+   * at a time, so a still-active bonus just makes this tick's attempt a
+   * no-op rather than rescheduling early.
+   */
+  private advanceBonusSchedule(dtMs: number): void {
+    this.bonusRemainingMs -= dtMs;
+    if (this.bonusRemainingMs <= 0) {
+      if (this.bonuses.length === 0) this.trySpawnBonus();
+      this.bonusRemainingMs = this.randomBonusGapMs();
+    }
+  }
+
+  private randomBonusGapMs(): number {
+    return 3500 + Math.random() * 2500;
   }
 
   private triggerGameOver(hitCar: Car): void {
@@ -291,7 +372,6 @@ export class Engine {
     };
     this.cars = this.cars.filter((car) => car.id !== hitCar.id);
     this.playerAlive = false;
-    this.score = Math.floor(this.elapsedPlayMs / 1000);
     this.transition = null;
     this.state = "gameover";
   }
@@ -312,6 +392,7 @@ export class Engine {
       playerY: y,
       playerAlive: this.playerAlive,
       cars: this.cars,
+      bonuses: this.bonuses,
       explosion: this.explosion,
       score: this.score,
     };
