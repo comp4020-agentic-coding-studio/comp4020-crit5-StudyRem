@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { OperationSeries } from "../src/game/path.ts";
-import { rowLanes } from "../src/game/spawner.ts";
+import { canSpawnInLane } from "../src/game/spawner.ts";
 import { LANE_COUNT } from "../src/game/types.ts";
 
 // This week's spec: https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/crits/05-game/
@@ -17,11 +17,11 @@ import { LANE_COUNT } from "../src/game/types.ts";
 // - "one rule of the game has a focused automated test" --- this game's rule
 //   is that traffic is generated *from* a pre-generated, guaranteed-reachable
 //   safe path (the "expected operation series", src/game/path.ts) rather than
-//   generated first and hoped to leave an opening: `rowLanes`
-//   (src/game/spawner.ts) never blocks whatever lane(s) the series names
-//   safe, `OperationSeries.laneAt` never demands an unreachable jump, and
-//   `safeLanesAt` always agrees with any other arrival close enough in time
-//   to physically collide with it. Collision itself stays verified by
+//   generated first and hoped to leave an opening: `canSpawnInLane`
+//   (src/game/spawner.ts) never allows a spawn in whatever lane(s) the series
+//   names safe, `OperationSeries.laneAt` never demands an unreachable jump,
+//   and `safeLanesAt` always agrees with any other arrival close enough in
+//   time to physically collide with it. Collision itself stays verified by
 //   playing, per the brief's own framing: a test can establish that a
 //   collision ends the round, only playing can tell you whether it feels
 //   fair.
@@ -48,25 +48,14 @@ describe("crit 5: no instructions anywhere on screen", () => {
   });
 });
 
-describe("crit 5: traffic never blocks the expected safe lane(s)", () => {
-  it("never blocks the safe lane, across densities, every lane, and many random draws", () => {
-    for (const density of [0, 0.25, 0.5, 0.75, 1, 1.5]) {
-      for (let safeLane = 0; safeLane < LANE_COUNT; safeLane++) {
-        for (let i = 0; i < 50; i++) {
-          const row = rowLanes(LANE_COUNT, [safeLane], density);
-          expect(row[safeLane]).toBe(false);
-        }
-      }
-    }
-  });
-
-  it("never blocks either lane in a two-lane safe set, even with a rigged always-blocked rng", () => {
+describe("crit 5: a car never spawns in a lane the expected path needs safe", () => {
+  it("allows a spawn iff the lane isn't in the safe set, across every lane and safe-set size", () => {
     for (let a = 0; a < LANE_COUNT; a++) {
       for (let b = 0; b < LANE_COUNT; b++) {
-        if (a === b) continue;
-        const row = rowLanes(LANE_COUNT, [a, b], 1, () => 0);
-        expect(row[a]).toBe(false);
-        expect(row[b]).toBe(false);
+        const safe = a === b ? [a] : [a, b];
+        for (let lane = 0; lane < LANE_COUNT; lane++) {
+          expect(canSpawnInLane(lane, safe)).toBe(!safe.includes(lane));
+        }
       }
     }
   });
@@ -92,10 +81,10 @@ describe("crit 5: the expected operation series is always reachable", () => {
   });
 
   it("safeLanesAt always shares a common lane between two arrivals close enough to collide", () => {
-    // Rows this close together in arrival time can have overlapping
-    // collision windows at the player's row (see engine.ts's spawnRow); if
-    // two such arrivals' safe-lane sets shared no lane, neither lane would
-    // actually be safe against both rows at once.
+    // Arrivals this close together in time can have overlapping collision
+    // windows at the player's row (see engine.ts's trySpawn); if two such
+    // arrivals' safe-lane sets shared no lane, neither lane would actually
+    // be safe against both arrivals at once.
     const marginMs = 625;
     const series = new OperationSeries(Math.floor(LANE_COUNT / 2), {
       laneCount: LANE_COUNT,

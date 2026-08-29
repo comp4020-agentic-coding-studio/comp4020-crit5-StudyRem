@@ -34,23 +34,22 @@ export interface Car {
 }
 
 export interface SpawnerConfig {
-  /** 0..1, chance a given non-safe lane gets a car in a given row. Can be 1
-   *  (fully block every other lane) since the expected operation series
-   *  guarantees a lane is always left open regardless. */
-  density: number;
   /** Pixels per second oncoming cars travel down the screen. */
   carSpeed: number;
-  /** Milliseconds between spawned rows of traffic. */
-  rowIntervalMs: number;
+  /** Minimum/maximum milliseconds a lane waits before its next spawn
+   *  attempt --- each lane runs its own independent, randomly timed
+   *  schedule, rather than every lane spawning together on a shared tick. */
+  minSpawnGapMs: number;
+  maxSpawnGapMs: number;
   /** Minimum/maximum milliseconds the expected path holds a lane before considering a move. */
   minHoldMs: number;
   maxHoldMs: number;
 }
 
 export const DEFAULT_SPAWNER_CONFIG: SpawnerConfig = {
-  density: 0.85,
   carSpeed: 220,
-  rowIntervalMs: 420,
+  minSpawnGapMs: 500,
+  maxSpawnGapMs: 1100,
   minHoldMs: 1700,
   maxHoldMs: 2900,
 };

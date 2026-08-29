@@ -1,6 +1,6 @@
 import { boxAt, isColliding, playerX as continuousPlayerX } from "./collision.ts";
 import { OperationSeries } from "./path.ts";
-import { rowLanes } from "./spawner.ts";
+import { canSpawnInLane } from "./spawner.ts";
 import {
   CAR_HEIGHT,
   DEFAULT_SPAWNER_CONFIG,
@@ -62,7 +62,7 @@ export class Engine {
   private cars: Car[] = [];
   private nextCarId = 0;
   private operationSeries!: OperationSeries;
-  private rowRemainingMs = 0;
+  private laneRemainingMs: number[] = [];
 
   private elapsedPlayMs = 0;
   private score = 0;
@@ -83,7 +83,6 @@ export class Engine {
     this.transition = null;
     this.bufferedInput = null;
     this.cars = [];
-    this.rowRemainingMs = 0;
     this.elapsedPlayMs = 0;
     this.score = 0;
     this.explosion = null;
@@ -144,7 +143,7 @@ export class Engine {
       return;
     }
 
-    this.advanceRowSchedule(dtMs);
+    this.advanceSpawnSchedule(dtMs);
   }
 
   private updateIntro(dtMs: number): void {
@@ -162,10 +161,10 @@ export class Engine {
         minHoldMs: this.config.minHoldMs,
         maxHoldMs: this.config.maxHoldMs,
       });
-      // First row spawns immediately --- the travel time from spawn to the
-      // player's row (several seconds at the default carSpeed) is itself the
-      // safe window to try the controls before traffic arrives.
-      this.rowRemainingMs = 0;
+      // Each lane gets its own independent, randomly timed spawn schedule ---
+      // staggering the starting offsets means lanes don't all fire their
+      // first attempt in sync either.
+      this.laneRemainingMs = Array.from({ length: LANE_COUNT }, () => this.randomSpawnGapMs());
     }
   }
 
@@ -203,48 +202,56 @@ export class Engine {
     return null;
   }
 
-  private advanceRowSchedule(dtMs: number): void {
-    this.rowRemainingMs -= dtMs;
-    if (this.rowRemainingMs <= 0) {
-      this.spawnRow();
-      this.rowRemainingMs = this.config.rowIntervalMs;
+  /**
+   * Each lane runs its own independent countdown to its next spawn attempt
+   * --- there's no shared "row" tick, so lanes fire at random, unsynchronized
+   * moments rather than all sweeping down together.
+   */
+  private advanceSpawnSchedule(dtMs: number): void {
+    for (let lane = 0; lane < LANE_COUNT; lane++) {
+      this.laneRemainingMs[lane] -= dtMs;
+      if (this.laneRemainingMs[lane] <= 0) {
+        this.trySpawn(lane);
+        this.laneRemainingMs[lane] = this.randomSpawnGapMs();
+      }
     }
   }
 
   /**
-   * Spawns one row of traffic. The lane(s) that must stay open aren't
-   * chosen here --- they're read off the expected operation series
-   * (path.ts) at the time this row will actually reach the player, so
+   * Attempts to spawn a car in `lane` right now. Whether it's actually
+   * allowed isn't decided here --- it's read off the expected operation
+   * series (path.ts) at the time this car will actually reach the player, so
    * traffic is generated *from* a guaranteed-solvable path rather than
-   * generated first and hoped to leave an opening. Traffic streams every
-   * `rowIntervalMs` without pausing; a lane change is handled by widening
-   * which lanes count as safe (see `safeLanesAt`'s margin), not by leaving
-   * a gap in the traffic.
+   * generated first and hoped to leave an opening. A blocked attempt simply
+   * spawns nothing and this lane tries again after its next random gap ---
+   * it isn't rescheduled early, so lanes stay unsynchronized even around a
+   * lane change.
    *
    * The margin has to cover two separate things close to a lane change:
    *
    * - Each car's box overlaps the player's row for roughly
-   *   `2 * CAR_HEIGHT / carSpeed` around its own arrival instant, wider than
-   *   the gap between rows --- so without a margin at least that wide, a row
-   *   could be treated as unambiguously safe for one lane while another,
-   *   overlapping-in-time row is unambiguously safe for a different lane.
+   *   `2 * CAR_HEIGHT / carSpeed` around its own arrival instant --- so
+   *   without a margin at least that wide, one car's arrival could be judged
+   *   safe for a lane while another, overlapping-in-time arrival is judged
+   *   safe for a different lane.
    * - The player's box is narrower than a lane but wider than half the gap
    *   between lane centers, so mid-transition it briefly overlaps *both*
-   *   the lane it's leaving and the one it's entering --- so a row can't
+   *   the lane it's leaving and the one it's entering --- so a car can't
    *   treat the just-left lane as fair game to block until the transition
    *   (`TRANSITION_DURATION_MS`) has actually had time to finish.
    */
-  private spawnRow(): void {
+  private trySpawn(lane: number): void {
     const travelMs = ((PLAYER_REST_Y + CAR_HEIGHT) / this.config.carSpeed) * 1000;
     const halfWindowMs = (CAR_HEIGHT / this.config.carSpeed) * 1000;
     const marginMs = halfWindowMs + TRANSITION_DURATION_MS + 100;
     const safeLanes = this.operationSeries.safeLanesAt(this.elapsedPlayMs + travelMs, marginMs);
-    const blocked = rowLanes(LANE_COUNT, safeLanes, this.config.density);
-    this.cars.push(
-      ...blocked.flatMap((isBlocked, lane) =>
-        isBlocked ? [{ id: this.nextCarId++, lane, y: -CAR_HEIGHT }] : [],
-      ),
-    );
+    if (!canSpawnInLane(lane, safeLanes)) return;
+    this.cars.push({ id: this.nextCarId++, lane, y: -CAR_HEIGHT });
+  }
+
+  private randomSpawnGapMs(): number {
+    const { minSpawnGapMs, maxSpawnGapMs } = this.config;
+    return minSpawnGapMs + Math.random() * (maxSpawnGapMs - minSpawnGapMs);
   }
 
   private triggerGameOver(hitCar: Car): void {
