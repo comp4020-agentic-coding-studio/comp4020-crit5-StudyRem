@@ -1,70 +1,63 @@
 # Process overview
 
-<!-- TEMPLATE: this file is a shape to fill in, not a form. Replace everything
-     in it with your own overview, and delete this comment — `pnpm
-     check:evidence` will remind you if it's still here. -->
-
-A reading-guide to how the work came together --- a map to your process, not an
-essay about it. Markers read this file and follow its citations; they don't
-trawl the repo for evidence you didn't point at, so if a moment mattered, cite
-it.
-
-This file is the shape; the course site's
-[assessment page](https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/topics/assessment/#what-you-submit)
-is the requirement, and its
-[word counts](https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/topics/assessment/#word-counts)
-cover every deliverable.
+A reading-guide to how the work came together.
 
 ## What I built
 
-One paragraph: the thing, and the idea behind it.
+Lane Dodge: a lane-dodging car game where the safety of the round is
+guaranteed by construction rather than caught after the fact — traffic is
+generated *from* two independent, pre-generated "expected path" timelines
+that each prove their own lane is always reachable, and a spawn is only ever
+allowed outside the union of both paths' currently-safe lanes. A bonus pickup
+reuses that identical guarantee (it only ever spawns where a car also could),
+and a difficulty ramp speeds up, densifies, and shortens lane-hold time over
+the course of a run.
 
 ## The moments that mattered
 
-Three or four for an assignment; fewer is fine for a weekly prototype. Keep the
-list short so each moment has room to do all four jobs:
+1. **The traffic generator matched my words, not my intent.** I asked for
+   traffic that spawned in independent, randomly-timed batches per lane —
+   what came back technically did that, but playing it showed cars lining up
+   into coincidental walls anyway, since nothing stopped several lanes'
+   independent timers landing close together by chance. Instead of accepting
+   "the code does what I asked" as done, I iterated through several
+   different generation strategies — staggered mini-waves, then generating
+   spawns from a provably-reachable expected path instead of hoping a random
+   draw left an opening, then independent per-lane real-time timers, then
+   finally an explicit global anti-bunching floor once even independent
+   timers still coincided occasionally. I only knew each attempt was actually
+   right by playing the built game repeatedly, not by re-reading the prompt
+   or the diff — "random"/"batch" never pinned down the distribution I
+   actually wanted precisely enough for either of us to check it any other
+   way.
 
-1. **what happened** --- the problem, or the thing that went wrong
-2. **what you did instead of the obvious thing** --- the call you made, and why
-   it beat the obvious one
-3. **how you knew it was right** --- the check you ran, the viewport you looked
-   at, what you read before accepting the diff
-4. **the citation** --- a commit or commit range, a `CLAUDE.md` change, a check
-   that went from red to green, a prompt paired with the commit it produced
+   > the batch/random generation is working in a different way than I
+   > thought though in the same way that word can tell
 
-Jobs 2 and 3 are the ones the repo can't tell a reader on its own, so they're
-where the marks are. The strongest moments are the ones where a correction
-landed in the **harness** --- the standards and checks your work has to satisfy
---- rather than in a retry: a rule added to `CLAUDE.md`, a check wired up, an
-attempt thrown away. Retrying until it passes is the routine case, and changing
-what the work runs against is the skilled one.
+   [`546cae3...fc9c5a5`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-StudyRem/compare/546cae3...fc9c5a5)
 
-Cite each moment as a link whose text is the commit hash or range and whose
-target is this repo's commit or compare URL, so a reader clicks straight to the
-evidence:
+2. **Iteration and a research subagent weren't the fix — finding the real
+   problem was.** The first difficulty ramp (linear, 90s, +40-50% on speed
+   and density) was bot-verified as mechanically correct, but playing it
+   still felt too easy. A few direct retuning passes on those same three
+   numbers didn't move the verdict, and pointing a research subagent at "why
+   does this feel easy" on its own wouldn't have been enough either — the
+   actual turn was recognizing the real problem wasn't something I could
+   name from the outset. It took the subagent's survey of shipped dodge-game
+   design (curves are front-loaded, not linear) plus a diagnosis specific to
+   this engine (two fixed 130ms constants were silently capping how hard the
+   other three knobs could ever push) before I could describe the problem
+   precisely enough to decide a direction: switch to a front-loaded curve,
+   steepen the deltas, and ramp the two constants down too. Bot-sim then
+   confirmed the redesign is safe and measurably steeper/earlier (avg speed
+   already 394.7px/s by t=10s vs. a 300 base, plateauing at 560 by t=60-70s,
+   0 crashes across 50 combined trials) — but that only confirms mechanical
+   correctness, not the feel; that verdict is still a playtest away. See
+   `reflections/crit-5.md` for the same thread from the other side.
 
-- one commit: [`a1b2c3d`](https://github.com/YOUR-ORG/YOUR-REPO/commit/a1b2c3d)
-- a range:
-  [`a1b2c3d...e4f5a6b`](https://github.com/YOUR-ORG/YOUR-REPO/compare/a1b2c3d...e4f5a6b)
+   > still feel too easy to me, get a sub-agent to deeply research such game
+   > design, and see if there's relevant open-source projects and how they
+   > design their dodging game.
 
-To pair a prompt with the commit it produced, quote the prompt (curated, not a
-full transcript) next to the citation:
-
-> the prompt, verbatim
-
-Screenshots are welcome where one carries the verification better than a
-sentence does. Commit the file to this repo and link it with a **relative**
-path, which is what makes it render on GitHub: `![alt text](docs/before.png)`.
-Images don't count towards the word count and don't replace the citation.
-
-## Before you ship
-
-`pnpm check:evidence` verifies your citations resolve to real commits, that a
-reflection entry the marker reads is in `reflections/`, and that your
-`CLAUDE.md` is there --- before a marker ever opens the file. It checks that
-your map is traceable, not that it is good: the marker judges whether your
-small, deliberately chosen set of moments shows real judgement and reflection. A
-green check is not a substitute for that curation.
-
-Images aren't checked: unlike a citation whose SHA doesn't resolve, a broken
-image is visible the moment this file is rendered on GitHub.
+   [`a3c63c8`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-StudyRem/commit/a3c63c8)
+   → [`6354763`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-StudyRem/commit/6354763)
