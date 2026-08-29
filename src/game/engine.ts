@@ -20,6 +20,14 @@ const TRANSITION_DURATION_MS = 130;
 // transition, where a single buffered move is captured and overwritable.
 const BUFFER_THRESHOLD = 0.75;
 const INTRO_DURATION_MS = 900;
+// Each lane's spawn timer is independent, so nothing stops several lanes
+// firing within a few ticks of each other purely by chance --- which reads
+// as a "line" of cars even though none of it was scheduled together. This
+// floor on the gap between ANY two spawns, regardless of lane, is what
+// actually prevents that: a blocked attempt just retries on its own next
+// random gap, so this only ever delays a spawn, never forces one, and can't
+// affect the safety guarantee in trySpawn.
+const MIN_GLOBAL_SPAWN_GAP_MS = 130;
 
 interface Transition {
   fromLane: number;
@@ -69,6 +77,7 @@ export class Engine {
   // rather than a single forced rail.
   private paths: OperationSeries[] = [];
   private laneRemainingMs: number[] = [];
+  private lastSpawnAtMs = -Infinity;
 
   private elapsedPlayMs = 0;
   private score = 0;
@@ -93,6 +102,7 @@ export class Engine {
     this.score = 0;
     this.explosion = null;
     this.playerAlive = true;
+    this.lastSpawnAtMs = -Infinity;
     this.beginIntro();
   }
 
@@ -175,6 +185,7 @@ export class Engine {
       // staggering the starting offsets means lanes don't all fire their
       // first attempt in sync either.
       this.laneRemainingMs = Array.from({ length: LANE_COUNT }, () => this.randomSpawnGapMs());
+      this.lastSpawnAtMs = -Infinity;
     }
   }
 
@@ -249,6 +260,12 @@ export class Engine {
    *   the lane it's leaving and the one it's entering --- so a car can't
    *   treat the just-left lane as fair game to block until the transition
    *   (`TRANSITION_DURATION_MS`) has actually had time to finish.
+   *
+   * On top of the lane-safety check, `MIN_GLOBAL_SPAWN_GAP_MS` also blocks
+   * this spawn if another lane spawned too recently --- independent per-lane
+   * timers will still occasionally line up by chance, and without this a
+   * coincidence like that reads as a synchronized "line" of cars even though
+   * none of it was actually scheduled together.
    */
   private trySpawn(lane: number): void {
     const travelMs = ((PLAYER_REST_Y + CAR_HEIGHT) / this.config.carSpeed) * 1000;
@@ -256,7 +273,9 @@ export class Engine {
     const marginMs = halfWindowMs + TRANSITION_DURATION_MS + 100;
     const safeLanes = this.paths.flatMap((path) => path.safeLanesAt(this.elapsedPlayMs + travelMs, marginMs));
     if (!canSpawnInLane(lane, safeLanes)) return;
+    if (this.elapsedPlayMs - this.lastSpawnAtMs < MIN_GLOBAL_SPAWN_GAP_MS) return;
     this.cars.push({ id: this.nextCarId++, lane, y: -CAR_HEIGHT });
+    this.lastSpawnAtMs = this.elapsedPlayMs;
   }
 
   private randomSpawnGapMs(): number {
