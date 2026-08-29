@@ -15,7 +15,7 @@ import {
 
 export type Direction = "left" | "right";
 
-const TRANSITION_DURATION_MS = 180;
+const TRANSITION_DURATION_MS = 130;
 // Input during a lane change is dropped, except in this last fraction of the
 // transition, where a single buffered move is captured and overwritable.
 const BUFFER_THRESHOLD = 0.75;
