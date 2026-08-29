@@ -61,7 +61,13 @@ export class Engine {
 
   private cars: Car[] = [];
   private nextCarId = 0;
-  private operationSeries!: OperationSeries;
+  // Two independent expected-path series, both guaranteeing a fully
+  // survivable path on their own --- taking the union of their safe lanes
+  // (see trySpawn) only ever adds options, so the guarantee holds no matter
+  // which one the player actually follows, or how they switch between them.
+  // This is what gives the player an actual choice of lane at any moment,
+  // rather than a single forced rail.
+  private paths: OperationSeries[] = [];
   private laneRemainingMs: number[] = [];
 
   private elapsedPlayMs = 0;
@@ -156,11 +162,15 @@ export class Engine {
     if (t >= 1) {
       this.state = "playing";
       this.elapsedPlayMs = 0;
-      this.operationSeries = new OperationSeries(this.currentLane, {
-        laneCount: LANE_COUNT,
-        minHoldMs: this.config.minHoldMs,
-        maxHoldMs: this.config.maxHoldMs,
-      });
+      this.paths = Array.from(
+        { length: 2 },
+        () =>
+          new OperationSeries(this.currentLane, {
+            laneCount: LANE_COUNT,
+            minHoldMs: this.config.minHoldMs,
+            maxHoldMs: this.config.maxHoldMs,
+          }),
+      );
       // Each lane gets its own independent, randomly timed spawn schedule ---
       // staggering the starting offsets means lanes don't all fire their
       // first attempt in sync either.
@@ -219,13 +229,13 @@ export class Engine {
 
   /**
    * Attempts to spawn a car in `lane` right now. Whether it's actually
-   * allowed isn't decided here --- it's read off the expected operation
-   * series (path.ts) at the time this car will actually reach the player, so
-   * traffic is generated *from* a guaranteed-solvable path rather than
-   * generated first and hoped to leave an opening. A blocked attempt simply
-   * spawns nothing and this lane tries again after its next random gap ---
-   * it isn't rescheduled early, so lanes stay unsynchronized even around a
-   * lane change.
+   * allowed isn't decided here --- it's read off the union of both expected
+   * path series (path.ts) at the time this car will actually reach the
+   * player, so traffic is generated *from* a guaranteed-solvable path rather
+   * than generated first and hoped to leave an opening. A blocked attempt
+   * simply spawns nothing and this lane tries again after its next random
+   * gap --- it isn't rescheduled early, so lanes stay unsynchronized even
+   * around a lane change.
    *
    * The margin has to cover two separate things close to a lane change:
    *
@@ -244,7 +254,7 @@ export class Engine {
     const travelMs = ((PLAYER_REST_Y + CAR_HEIGHT) / this.config.carSpeed) * 1000;
     const halfWindowMs = (CAR_HEIGHT / this.config.carSpeed) * 1000;
     const marginMs = halfWindowMs + TRANSITION_DURATION_MS + 100;
-    const safeLanes = this.operationSeries.safeLanesAt(this.elapsedPlayMs + travelMs, marginMs);
+    const safeLanes = this.paths.flatMap((path) => path.safeLanesAt(this.elapsedPlayMs + travelMs, marginMs));
     if (!canSpawnInLane(lane, safeLanes)) return;
     this.cars.push({ id: this.nextCarId++, lane, y: -CAR_HEIGHT });
   }
