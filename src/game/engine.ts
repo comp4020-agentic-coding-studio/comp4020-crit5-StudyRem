@@ -20,25 +20,20 @@ import {
 
 export type Direction = "left" | "right";
 
-const TRANSITION_DURATION_MS = 130;
 // Input during a lane change is dropped, except in this last fraction of the
 // transition, where a single buffered move is captured and overwritable.
 const BUFFER_THRESHOLD = 0.75;
 const INTRO_DURATION_MS = 900;
-// Each lane's spawn timer is independent, so nothing stops several lanes
-// firing within a few ticks of each other purely by chance --- which reads
-// as a "line" of cars even though none of it was scheduled together. This
-// floor on the gap between ANY two spawns, regardless of lane, is what
-// actually prevents that: a blocked attempt just retries on its own next
-// random gap, so this only ever delays a spawn, never forces one, and can't
-// affect the safety guarantee in trySpawn.
-const MIN_GLOBAL_SPAWN_GAP_MS = 130;
 
 interface Transition {
   fromLane: number;
   toLane: number;
   elapsedMs: number;
   progress: number;
+  /** Locked in at transition start (see currentTransitionDurationMs) so an
+   *  in-flight lane change never changes length partway through, even if
+   *  difficulty ramps while the player is mid-transition. */
+  durationMs: number;
 }
 
 interface Explosion {
@@ -163,6 +158,7 @@ export class Engine {
       toLane: this.currentLane + delta,
       elapsedMs: 0,
       progress: 0,
+      durationMs: this.currentTransitionDurationMs(),
     };
   }
 
@@ -220,7 +216,7 @@ export class Engine {
     if (!this.transition) return;
 
     this.transition.elapsedMs += dtMs;
-    this.transition.progress = Math.min(1, this.transition.elapsedMs / TRANSITION_DURATION_MS);
+    this.transition.progress = Math.min(1, this.transition.elapsedMs / this.transition.durationMs);
 
     if (this.transition.progress >= 1) {
       this.currentLane = this.transition.toLane;
@@ -302,20 +298,24 @@ export class Engine {
    *   between lane centers, so mid-transition it briefly overlaps *both*
    *   the lane it's leaving and the one it's entering --- so a car can't
    *   treat the just-left lane as fair game to block until the transition
-   *   (`TRANSITION_DURATION_MS`) has actually had time to finish.
+   *   (`currentTransitionDurationMs()`) has actually had time to finish.
    *
-   * On top of the lane-safety check, `MIN_GLOBAL_SPAWN_GAP_MS` also blocks
-   * this spawn if another lane spawned too recently --- independent per-lane
-   * timers will still occasionally line up by chance, and without this a
-   * coincidence like that reads as a synchronized "line" of cars even though
-   * none of it was actually scheduled together.
+   * On top of the lane-safety check, `currentMinGlobalSpawnGapMs()` also
+   * blocks this spawn if another lane spawned too recently --- independent
+   * per-lane timers will still occasionally line up by chance, and without
+   * this a coincidence like that reads as a synchronized "line" of cars even
+   * though none of it was actually scheduled together. Both values ramp with
+   * difficulty (see MAX_DIFFICULTY_CONFIG) but can only ever tighten the
+   * safety margin or delay a spawn further, never loosen a lane's safety
+   * check or force a spawn through, so ramping them can't break the
+   * guarantee above.
    */
   private trySpawn(lane: number): void {
     const speed = this.currentCarSpeed();
     const { travelMs, marginMs } = this.arrivalWindow(speed);
     const safeLanes = this.unionSafeLanesAt(this.elapsedPlayMs + travelMs, marginMs);
     if (!canSpawnInLane(lane, safeLanes)) return;
-    if (this.elapsedPlayMs - this.lastSpawnAtMs < MIN_GLOBAL_SPAWN_GAP_MS) return;
+    if (this.elapsedPlayMs - this.lastSpawnAtMs < this.currentMinGlobalSpawnGapMs()) return;
     this.cars.push({ id: this.nextCarId++, lane, y: -CAR_HEIGHT, speed });
     this.lastSpawnAtMs = this.elapsedPlayMs;
   }
@@ -347,7 +347,7 @@ export class Engine {
   private arrivalWindow(speed: number): { travelMs: number; marginMs: number } {
     const travelMs = ((PLAYER_REST_Y + CAR_HEIGHT) / speed) * 1000;
     const halfWindowMs = (CAR_HEIGHT / speed) * 1000;
-    const marginMs = halfWindowMs + TRANSITION_DURATION_MS + 100;
+    const marginMs = halfWindowMs + this.currentTransitionDurationMs() + 100;
     return { travelMs, marginMs };
   }
 
@@ -361,9 +361,15 @@ export class Engine {
    * MAX_DIFFICULTY_CONFIG, 0 at the start of play up to 1 once
    * RAMP_DURATION_MS has elapsed, holding steady at 1 after that --- a pure
    * function of elapsedPlayMs, so it needs no reset logic of its own.
+   *
+   * sqrt front-loads the curve: half of RAMP_DURATION_MS's total delta lands
+   * by the first quarter of the window, ~70% by the halfway point, so the
+   * jump is felt early (where a player's "is this hard?" impression forms)
+   * rather than building at a flat, constant rate the whole way.
    */
   private rampT(): number {
-    return Math.min(1, this.elapsedPlayMs / RAMP_DURATION_MS);
+    const linear = Math.min(1, this.elapsedPlayMs / RAMP_DURATION_MS);
+    return Math.sqrt(linear);
   }
 
   private lerp(from: number, to: number, t: number): number {
@@ -388,6 +394,14 @@ export class Engine {
       min: this.lerp(this.config.minHoldMs, MAX_DIFFICULTY_CONFIG.minHoldMs, t),
       max: this.lerp(this.config.maxHoldMs, MAX_DIFFICULTY_CONFIG.maxHoldMs, t),
     };
+  }
+
+  private currentMinGlobalSpawnGapMs(): number {
+    return this.lerp(this.config.minGlobalSpawnGapMs, MAX_DIFFICULTY_CONFIG.minGlobalSpawnGapMs, this.rampT());
+  }
+
+  private currentTransitionDurationMs(): number {
+    return this.lerp(this.config.transitionDurationMs, MAX_DIFFICULTY_CONFIG.transitionDurationMs, this.rampT());
   }
 
   /** Ramps both expected paths' lane-hold duration in place --- see the

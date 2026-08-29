@@ -59,6 +59,10 @@ export interface SpawnerConfig {
   /** Minimum/maximum milliseconds the expected path holds a lane before considering a move. */
   minHoldMs: number;
   maxHoldMs: number;
+  /** Floor on the gap between any two spawns regardless of lane (anti-bunching). */
+  minGlobalSpawnGapMs: number;
+  /** Milliseconds a lane change animation takes. */
+  transitionDurationMs: number;
 }
 
 export const DEFAULT_SPAWNER_CONFIG: SpawnerConfig = {
@@ -67,16 +71,23 @@ export const DEFAULT_SPAWNER_CONFIG: SpawnerConfig = {
   maxSpawnGapMs: 2400,
   minHoldMs: 1700,
   maxHoldMs: 2900,
+  minGlobalSpawnGapMs: 130,
+  transitionDurationMs: 130,
 };
 
 /** Pace a run has ramped all the way up to once `RAMP_DURATION_MS` of play
- *  has elapsed --- faster cars, denser traffic, shorter lane holds. */
+ *  has elapsed --- faster cars, denser traffic, shorter lane holds, and a
+ *  tighter anti-bunching floor / lane-change animation, which frees up the
+ *  safety margin around each spawn so the other levers actually have room
+ *  to push the game harder rather than being capped by fixed constants. */
 export const MAX_DIFFICULTY_CONFIG: SpawnerConfig = {
-  carSpeed: 420,
-  minSpawnGapMs: 800,
-  maxSpawnGapMs: 1500,
-  minHoldMs: 1000,
-  maxHoldMs: 1600,
+  carSpeed: 560,
+  minSpawnGapMs: 550,
+  maxSpawnGapMs: 1000,
+  minHoldMs: 750,
+  maxHoldMs: 1000,
+  minGlobalSpawnGapMs: 90,
+  transitionDurationMs: 100,
 };
 
-export const RAMP_DURATION_MS = 90_000;
+export const RAMP_DURATION_MS = 40_000;
