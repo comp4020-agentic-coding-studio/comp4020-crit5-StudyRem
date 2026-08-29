@@ -60,8 +60,10 @@ export class Engine {
 
   private cars: Car[] = [];
   private nextCarId = 0;
-  private batchState: "active" | "waiting" = "waiting";
+  private batchState: "gap" | "spawning" | "clearing" = "gap";
   private gapRemainingMs = 0;
+  private wavesRemainingInBatch = 0;
+  private waveGapRemainingMs = 0;
 
   private elapsedPlayMs = 0;
   private score = 0;
@@ -82,8 +84,10 @@ export class Engine {
     this.transition = null;
     this.bufferedInput = null;
     this.cars = [];
-    this.batchState = "waiting";
+    this.batchState = "gap";
     this.gapRemainingMs = 0;
+    this.wavesRemainingInBatch = 0;
+    this.waveGapRemainingMs = 0;
     this.elapsedPlayMs = 0;
     this.score = 0;
     this.explosion = null;
@@ -160,7 +164,7 @@ export class Engine {
       // A brief gap before the first batch, matching the gap between every
       // later batch --- a safe window to try the controls before any
       // traffic exists, not just a wordless arrival.
-      this.batchState = "waiting";
+      this.batchState = "gap";
       this.gapRemainingMs = this.config.batchGapMs;
     }
   }
@@ -199,26 +203,61 @@ export class Engine {
   }
 
   private advanceBatchSchedule(dtMs: number): void {
-    if (this.batchState === "active") {
-      const cleared = this.cars.every((car) => car.y - CAR_HEIGHT / 2 > GAME_HEIGHT);
-      if (cleared) {
-        this.cars = [];
-        this.batchState = "waiting";
-        this.gapRemainingMs = this.config.batchGapMs;
-      }
+    if (this.batchState === "gap") {
+      this.gapRemainingMs -= dtMs;
+      if (this.gapRemainingMs <= 0) this.beginBatch();
       return;
     }
 
-    this.gapRemainingMs -= dtMs;
-    if (this.gapRemainingMs <= 0) this.spawnBatch();
+    if (this.batchState === "spawning") {
+      this.waveGapRemainingMs -= dtMs;
+      if (this.waveGapRemainingMs <= 0) this.fireNextWave();
+      return;
+    }
+
+    // "clearing": every wave in this batch has spawned; wait for all of the
+    // batch's cars --- possibly from several overlapping waves --- to pass
+    // off-screen before starting the longer gap to the next batch.
+    const cleared = this.cars.every((car) => car.y - CAR_HEIGHT / 2 > GAME_HEIGHT);
+    if (cleared) {
+      this.cars = [];
+      this.batchState = "gap";
+      this.gapRemainingMs = this.config.batchGapMs;
+    }
   }
 
-  private spawnBatch(): void {
+  /**
+   * Starts a new batch: 2-3 mini-waves fired in quick succession, each its
+   * own independently-generated set of blocked lanes. Later waves fire
+   * without waiting for earlier ones to clear the screen --- that overlap is
+   * what makes cars in different lanes arrive at different times, instead of
+   * one synchronized wall of cars.
+   */
+  private beginBatch(): void {
+    const { minWavesPerBatch, maxWavesPerBatch } = this.config;
+    const span = maxWavesPerBatch - minWavesPerBatch + 1;
+    this.wavesRemainingInBatch = minWavesPerBatch + Math.floor(Math.random() * span);
+    this.batchState = "spawning";
+    this.fireNextWave();
+  }
+
+  private fireNextWave(): void {
+    this.spawnWave();
+    this.wavesRemainingInBatch--;
+    if (this.wavesRemainingInBatch <= 0) {
+      this.batchState = "clearing";
+    } else {
+      this.waveGapRemainingMs = this.config.waveGapMs;
+    }
+  }
+
+  private spawnWave(): void {
     const blocked = generateBatch(LANE_COUNT, this.config.density);
-    this.cars = blocked.flatMap((isBlocked, lane) =>
-      isBlocked ? [{ id: this.nextCarId++, lane, y: -CAR_HEIGHT }] : [],
+    this.cars.push(
+      ...blocked.flatMap((isBlocked, lane) =>
+        isBlocked ? [{ id: this.nextCarId++, lane, y: -CAR_HEIGHT }] : [],
+      ),
     );
-    this.batchState = "active";
   }
 
   private triggerGameOver(hitCar: Car): void {
