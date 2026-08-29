@@ -1,16 +1,129 @@
+:root {
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
-  padding: 2rem;
+  height: 100dvh;
+  overflow: hidden;
+  background: #0c0e11;
+  color: #e8e8e8;
   font-family: system-ui, sans-serif;
-  line-height: 1.6;
-  color: #1a1a1a;
+}
+
+header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  padding: 0.35rem 0.6rem;
+  z-index: 5;
+}
+
+header nav a {
+  color: #7c8590;
+  font-size: 0.75rem;
+  text-decoration: none;
 }
 
 main {
-  max-width: 40rem;
-  margin: 0 auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-a {
-  color: #0b5fff;
+#game-root {
+  position: relative;
+  aspect-ratio: 390 / 844;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  background: #000;
+  overflow: hidden;
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  padding: 1rem;
+  box-sizing: border-box;
+  text-align: center;
+  background: rgba(10, 12, 15, 0.82);
+}
+
+#start-screen h1 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: 0.02em;
+}
+
+.primary-button {
+  font-size: 1.1rem;
+  padding: 0.75rem 2rem;
+  border-radius: 999px;
+  border: none;
+  background: #e0342f;
+  color: white;
+  cursor: pointer;
+}
+
+.primary-button:active {
+  transform: scale(0.97);
+}
+
+.final-score {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.hud {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0.75rem;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.score {
+  align-self: center;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  color: white;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.controls {
+  display: flex;
+  justify-content: space-between;
+  pointer-events: auto;
+}
+
+.arrow-button {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.arrow-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }

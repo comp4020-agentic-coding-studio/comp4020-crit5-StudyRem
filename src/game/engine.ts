@@ -157,7 +157,11 @@ export class Engine {
     if (t >= 1) {
       this.state = "playing";
       this.elapsedPlayMs = 0;
-      this.spawnBatch();
+      // A brief gap before the first batch, matching the gap between every
+      // later batch --- a safe window to try the controls before any
+      // traffic exists, not just a wordless arrival.
+      this.batchState = "waiting";
+      this.gapRemainingMs = this.config.batchGapMs;
     }
   }
 

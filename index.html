@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>COMP4020 prototype</title>
+    <title>Lane Dodge</title>
     <meta
       name="description"
-      content="Replace this with one sentence saying what this page is. A search result and a link preview both show it."
+      content="A tiny lane-dodging driving game: steer left and right to survive the oncoming traffic."
     />
 
     <!--
@@ -27,11 +27,27 @@
       </nav>
     </header>
     <main>
-      <h1>COMP4020 prototype</h1>
-      <p>
-        Replace this with your prototype. This week's brief is on the course website;
-        <code>spec/README.md</code> explains how the checks in this repo relate to it.
-      </p>
+      <div id="game-root">
+        <canvas id="game-canvas" width="390" height="844" aria-hidden="true"></canvas>
+
+        <section id="start-screen" class="overlay">
+          <h1>Lane Dodge</h1>
+          <button id="play-button" type="button" class="primary-button">Play</button>
+        </section>
+
+        <div id="hud" class="hud" hidden>
+          <span id="score" class="score">0</span>
+          <div class="controls">
+            <button id="left-button" type="button" class="arrow-button" aria-label="Move left">&#9664;</button>
+            <button id="right-button" type="button" class="arrow-button" aria-label="Move right">&#9654;</button>
+          </div>
+        </div>
+
+        <section id="gameover-screen" class="overlay" hidden>
+          <p class="final-score">Score: <span id="final-score">0</span></p>
+          <button id="restart-button" type="button" class="primary-button">Restart</button>
+        </section>
+      </div>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>
