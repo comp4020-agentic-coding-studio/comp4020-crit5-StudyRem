@@ -212,39 +212,34 @@ export class Engine {
   }
 
   /**
-   * Spawns one row of traffic. The lane that must stay open isn't chosen
-   * here --- it's read off the expected operation series (path.ts) at the
-   * time this row will actually reach the player, so traffic is generated
-   * *from* a guaranteed-solvable path rather than generated first and hoped
-   * to leave an opening.
+   * Spawns one row of traffic. The lane(s) that must stay open aren't
+   * chosen here --- they're read off the expected operation series
+   * (path.ts) at the time this row will actually reach the player, so
+   * traffic is generated *from* a guaranteed-solvable path rather than
+   * generated first and hoped to leave an opening. Traffic streams every
+   * `rowIntervalMs` without pausing; a lane change is handled by widening
+   * which lanes count as safe (see `safeLanesAt`'s margin), not by leaving
+   * a gap in the traffic.
    *
-   * A row's arrival must stay a margin away from the *edges* of the segment
-   * it falls in, for two separate reasons:
+   * The margin has to cover two separate things close to a lane change:
    *
    * - Each car's box overlaps the player's row for roughly
    *   `2 * CAR_HEIGHT / carSpeed` around its own arrival instant, wider than
    *   the gap between rows --- so without a margin at least that wide, a row
-   *   could still be overlapping the player when an adjacent, differently
-   *   safe segment's row arrives too, and neither lane would be safe against
-   *   both at once.
+   *   could be treated as unambiguously safe for one lane while another,
+   *   overlapping-in-time row is unambiguously safe for a different lane.
    * - The player's box is narrower than a lane but wider than half the gap
    *   between lane centers, so mid-transition it briefly overlaps *both*
-   *   the lane it's leaving and the one it's entering. A row that starts
-   *   blocking the just-left lane can't be allowed to reach collision range
-   *   before the transition (`TRANSITION_DURATION_MS`) has actually
-   *   finished, or it can hit a player who did everything right.
-   *
-   * Rows whose arrival is too close to a lane change are skipped (a brief
-   * quiet gap in traffic right as the safe lane changes) rather than
-   * spawned against an ambiguous or not-yet-vacated lane.
+   *   the lane it's leaving and the one it's entering --- so a row can't
+   *   treat the just-left lane as fair game to block until the transition
+   *   (`TRANSITION_DURATION_MS`) has actually had time to finish.
    */
   private spawnRow(): void {
     const travelMs = ((PLAYER_REST_Y + CAR_HEIGHT) / this.config.carSpeed) * 1000;
     const halfWindowMs = (CAR_HEIGHT / this.config.carSpeed) * 1000;
     const marginMs = halfWindowMs + TRANSITION_DURATION_MS + 100;
-    const safeLane = this.operationSeries.stableLaneAt(this.elapsedPlayMs + travelMs, marginMs);
-    if (safeLane === null) return;
-    const blocked = rowLanes(LANE_COUNT, safeLane, this.config.density);
+    const safeLanes = this.operationSeries.safeLanesAt(this.elapsedPlayMs + travelMs, marginMs);
+    const blocked = rowLanes(LANE_COUNT, safeLanes, this.config.density);
     this.cars.push(
       ...blocked.flatMap((isBlocked, lane) =>
         isBlocked ? [{ id: this.nextCarId++, lane, y: -CAR_HEIGHT }] : [],

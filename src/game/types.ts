@@ -51,6 +51,6 @@ export const DEFAULT_SPAWNER_CONFIG: SpawnerConfig = {
   density: 0.85,
   carSpeed: 220,
   rowIntervalMs: 420,
-  minHoldMs: 2200,
-  maxHoldMs: 3400,
+  minHoldMs: 1700,
+  maxHoldMs: 2900,
 };

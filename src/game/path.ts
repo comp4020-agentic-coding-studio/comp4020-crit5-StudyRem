@@ -31,33 +31,46 @@ export class OperationSeries {
 
   /** The lane the expected path holds safe at time `tMs`. */
   laneAt(tMs: number): number {
-    return this.segmentAt(tMs).lane;
+    this.growUntil(tMs);
+    return this.segments[this.indexAt(tMs)].lane;
   }
 
   /**
-   * The lane the path holds safe at `tMs`, or `null` if `tMs` falls within
-   * `marginMs` of that segment's start or end. Two arrivals that are each
-   * `marginMs` or more from a boundary --- on the same side or opposite
-   * sides of it --- are always at least `2*marginMs` apart, which is what
-   * lets a caller pick `marginMs` to guarantee any two non-null results
-   * close enough in time to physically collide always agree on the lane.
+   * The lane(s) that must stay open for a row arriving at `tMs`. Normally
+   * just the one lane the current segment holds safe --- but within
+   * `marginMs` of a segment boundary, both the outgoing and incoming lane
+   * are included, since the player could physically still be crossing
+   * between them at that moment. This is what lets traffic keep streaming
+   * continuously right through a lane change (nothing ever has to pause
+   * spawning to stay safe) while still guaranteeing that any two rows close
+   * enough in time to actually collide agree on at least one lane that's
+   * safe for both.
    */
-  stableLaneAt(tMs: number, marginMs: number): number | null {
-    const { lane, start, end } = this.segmentAt(tMs, marginMs);
-    if (tMs - start < marginMs || end - tMs < marginMs) return null;
-    return lane;
+  safeLanesAt(tMs: number, marginMs: number): number[] {
+    this.growUntil(tMs + marginMs);
+    const index = this.indexAt(tMs);
+    const { start, end } = this.boundsAt(index);
+    const lanes = new Set<number>([this.segments[index].lane]);
+    if (tMs - start < marginMs && index > 0) lanes.add(this.segments[index - 1].lane);
+    if (end - tMs < marginMs && index < this.segments.length - 1) {
+      lanes.add(this.segments[index + 1].lane);
+    }
+    return [...lanes];
   }
 
-  private segmentAt(tMs: number, lookahead = 0): { lane: number; start: number; end: number } {
-    this.growUntil(tMs + lookahead);
+  private indexAt(tMs: number): number {
     let cursor = 0;
-    for (const segment of this.segments) {
-      const start = cursor;
-      cursor += segment.durationMs;
-      if (tMs < cursor) return { lane: segment.lane, start, end: cursor };
+    for (let i = 0; i < this.segments.length; i++) {
+      cursor += this.segments[i].durationMs;
+      if (tMs < cursor) return i;
     }
-    const last = this.segments[this.segments.length - 1];
-    return { lane: last.lane, start: this.totalMs - last.durationMs, end: this.totalMs };
+    return this.segments.length - 1;
+  }
+
+  private boundsAt(index: number): { start: number; end: number } {
+    let start = 0;
+    for (let i = 0; i < index; i++) start += this.segments[i].durationMs;
+    return { start, end: start + this.segments[index].durationMs };
   }
 
   private growUntil(tMs: number): void {
