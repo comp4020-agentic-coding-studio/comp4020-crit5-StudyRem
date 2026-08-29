@@ -5,8 +5,8 @@ export const GAME_WIDTH = 390;
 export const GAME_HEIGHT = 844;
 
 export const LANE_COUNT = 6;
-const ROAD_MARGIN = 15;
-const ROAD_WIDTH = GAME_WIDTH - ROAD_MARGIN * 2;
+export const ROAD_MARGIN = 15;
+export const ROAD_WIDTH = GAME_WIDTH - ROAD_MARGIN * 2;
 export const LANE_WIDTH = ROAD_WIDTH / LANE_COUNT;
 
 export const CAR_WIDTH = 44;
