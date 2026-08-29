@@ -31,12 +31,17 @@ export interface Car {
   id: number;
   lane: number;
   y: number;
+  /** Locked in at spawn time so a car's actual arrival never drifts from the
+   *  travel time trySpawn used to pick a safe lane for it, even if difficulty
+   *  ramps up while it's already on screen. */
+  speed: number;
 }
 
 export interface Bonus {
   id: number;
   lane: number;
   y: number;
+  speed: number;
 }
 
 /** Collision/draw box for a bonus --- smaller than a car so catching one takes some precision. */
@@ -63,3 +68,15 @@ export const DEFAULT_SPAWNER_CONFIG: SpawnerConfig = {
   minHoldMs: 1700,
   maxHoldMs: 2900,
 };
+
+/** Pace a run has ramped all the way up to once `RAMP_DURATION_MS` of play
+ *  has elapsed --- faster cars, denser traffic, shorter lane holds. */
+export const MAX_DIFFICULTY_CONFIG: SpawnerConfig = {
+  carSpeed: 420,
+  minSpawnGapMs: 800,
+  maxSpawnGapMs: 1500,
+  minHoldMs: 1000,
+  maxHoldMs: 1600,
+};
+
+export const RAMP_DURATION_MS = 90_000;

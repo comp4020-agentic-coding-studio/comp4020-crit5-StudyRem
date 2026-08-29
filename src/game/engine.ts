@@ -1,5 +1,5 @@
 import { boxAt, isColliding, playerX as continuousPlayerX, squareBoxAt } from "./collision.ts";
-import { OperationSeries } from "./path.ts";
+import { OperationSeries, type PathConfig } from "./path.ts";
 import { canSpawnInLane, pickBonusLane } from "./spawner.ts";
 import {
   BONUS_POINTS,
@@ -8,7 +8,9 @@ import {
   DEFAULT_SPAWNER_CONFIG,
   GAME_HEIGHT,
   LANE_COUNT,
+  MAX_DIFFICULTY_CONFIG,
   PLAYER_REST_Y,
+  RAMP_DURATION_MS,
   laneCenterX,
   type Bonus,
   type Car,
@@ -80,6 +82,12 @@ export class Engine {
   // This is what gives the player an actual choice of lane at any moment,
   // rather than a single forced rail.
   private paths: OperationSeries[] = [];
+  // The same PathConfig object each path in `paths` was built from, kept
+  // around so advanceDifficulty() can ramp minHoldMs/maxHoldMs on it ---
+  // OperationSeries reads these fields live off the reference at each new
+  // segment's generation time, so mutating them here needs no changes to
+  // path.ts at all.
+  private pathConfigs: PathConfig[] = [];
   private laneRemainingMs: number[] = [];
   private lastSpawnAtMs = -Infinity;
 
@@ -166,6 +174,7 @@ export class Engine {
     if (this.state !== "playing") return;
 
     this.elapsedPlayMs += dtMs;
+    this.advanceDifficulty();
     this.advanceTransition(dtMs);
     this.advanceCars(dtMs);
     this.advanceBonuses(dtMs);
@@ -192,15 +201,12 @@ export class Engine {
     if (t >= 1) {
       this.state = "playing";
       this.elapsedPlayMs = 0;
-      this.paths = Array.from(
-        { length: 2 },
-        () =>
-          new OperationSeries(this.currentLane, {
-            laneCount: LANE_COUNT,
-            minHoldMs: this.config.minHoldMs,
-            maxHoldMs: this.config.maxHoldMs,
-          }),
-      );
+      this.pathConfigs = Array.from({ length: 2 }, () => ({
+        laneCount: LANE_COUNT,
+        minHoldMs: this.config.minHoldMs,
+        maxHoldMs: this.config.maxHoldMs,
+      }));
+      this.paths = this.pathConfigs.map((pathConfig) => new OperationSeries(this.currentLane, pathConfig));
       // Each lane gets its own independent, randomly timed spawn schedule ---
       // staggering the starting offsets means lanes don't all fire their
       // first attempt in sync either.
@@ -229,14 +235,12 @@ export class Engine {
   }
 
   private advanceCars(dtMs: number): void {
-    const distance = (this.config.carSpeed * dtMs) / 1000;
-    for (const car of this.cars) car.y += distance;
+    for (const car of this.cars) car.y += (car.speed * dtMs) / 1000;
     this.cars = this.cars.filter((car) => car.y - CAR_HEIGHT / 2 <= GAME_HEIGHT);
   }
 
   private advanceBonuses(dtMs: number): void {
-    const distance = (this.config.carSpeed * dtMs) / 1000;
-    for (const bonus of this.bonuses) bonus.y += distance;
+    for (const bonus of this.bonuses) bonus.y += (bonus.speed * dtMs) / 1000;
     this.bonuses = this.bonuses.filter((bonus) => bonus.y - BONUS_SIZE / 2 <= GAME_HEIGHT);
   }
 
@@ -307,11 +311,12 @@ export class Engine {
    * none of it was actually scheduled together.
    */
   private trySpawn(lane: number): void {
-    const { travelMs, marginMs } = this.arrivalWindow();
+    const speed = this.currentCarSpeed();
+    const { travelMs, marginMs } = this.arrivalWindow(speed);
     const safeLanes = this.unionSafeLanesAt(this.elapsedPlayMs + travelMs, marginMs);
     if (!canSpawnInLane(lane, safeLanes)) return;
     if (this.elapsedPlayMs - this.lastSpawnAtMs < MIN_GLOBAL_SPAWN_GAP_MS) return;
-    this.cars.push({ id: this.nextCarId++, lane, y: -CAR_HEIGHT });
+    this.cars.push({ id: this.nextCarId++, lane, y: -CAR_HEIGHT, speed });
     this.lastSpawnAtMs = this.elapsedPlayMs;
   }
 
@@ -323,10 +328,11 @@ export class Engine {
    * needed. The set is never empty: each path always holds some lane safe.
    */
   private trySpawnBonus(): void {
-    const { travelMs, marginMs } = this.arrivalWindow();
+    const speed = this.currentCarSpeed();
+    const { travelMs, marginMs } = this.arrivalWindow(speed);
     const safeLanes = this.unionSafeLanesAt(this.elapsedPlayMs + travelMs, marginMs);
     const lane = pickBonusLane(safeLanes);
-    this.bonuses.push({ id: this.nextBonusId++, lane, y: -BONUS_SIZE });
+    this.bonuses.push({ id: this.nextBonusId++, lane, y: -BONUS_SIZE, speed });
   }
 
   /** The union of both expected paths' safe lanes at `tMs` --- see trySpawn. */
@@ -334,16 +340,64 @@ export class Engine {
     return this.paths.flatMap((path) => path.safeLanesAt(tMs, marginMs));
   }
 
-  private arrivalWindow(): { travelMs: number; marginMs: number } {
-    const travelMs = ((PLAYER_REST_Y + CAR_HEIGHT) / this.config.carSpeed) * 1000;
-    const halfWindowMs = (CAR_HEIGHT / this.config.carSpeed) * 1000;
+  /** `speed` is the pace this specific spawn will travel at for its whole
+   *  lifetime (see the `speed` field on Car/Bonus), so travel time and
+   *  arrival margin are computed from that same fixed value, not whatever
+   *  the ramp has moved on to by the time it actually arrives. */
+  private arrivalWindow(speed: number): { travelMs: number; marginMs: number } {
+    const travelMs = ((PLAYER_REST_Y + CAR_HEIGHT) / speed) * 1000;
+    const halfWindowMs = (CAR_HEIGHT / speed) * 1000;
     const marginMs = halfWindowMs + TRANSITION_DURATION_MS + 100;
     return { travelMs, marginMs };
   }
 
   private randomSpawnGapMs(): number {
-    const { minSpawnGapMs, maxSpawnGapMs } = this.config;
-    return minSpawnGapMs + Math.random() * (maxSpawnGapMs - minSpawnGapMs);
+    const { min, max } = this.currentSpawnGapRange();
+    return min + Math.random() * (max - min);
+  }
+
+  /**
+   * How far a run has ramped from DEFAULT_SPAWNER_CONFIG towards
+   * MAX_DIFFICULTY_CONFIG, 0 at the start of play up to 1 once
+   * RAMP_DURATION_MS has elapsed, holding steady at 1 after that --- a pure
+   * function of elapsedPlayMs, so it needs no reset logic of its own.
+   */
+  private rampT(): number {
+    return Math.min(1, this.elapsedPlayMs / RAMP_DURATION_MS);
+  }
+
+  private lerp(from: number, to: number, t: number): number {
+    return from + (to - from) * t;
+  }
+
+  private currentCarSpeed(): number {
+    return this.lerp(this.config.carSpeed, MAX_DIFFICULTY_CONFIG.carSpeed, this.rampT());
+  }
+
+  private currentSpawnGapRange(): { min: number; max: number } {
+    const t = this.rampT();
+    return {
+      min: this.lerp(this.config.minSpawnGapMs, MAX_DIFFICULTY_CONFIG.minSpawnGapMs, t),
+      max: this.lerp(this.config.maxSpawnGapMs, MAX_DIFFICULTY_CONFIG.maxSpawnGapMs, t),
+    };
+  }
+
+  private currentHoldRange(): { min: number; max: number } {
+    const t = this.rampT();
+    return {
+      min: this.lerp(this.config.minHoldMs, MAX_DIFFICULTY_CONFIG.minHoldMs, t),
+      max: this.lerp(this.config.maxHoldMs, MAX_DIFFICULTY_CONFIG.maxHoldMs, t),
+    };
+  }
+
+  /** Ramps both expected paths' lane-hold duration in place --- see the
+   *  `pathConfigs` field for why mutating it here is enough. */
+  private advanceDifficulty(): void {
+    const { min, max } = this.currentHoldRange();
+    for (const pathConfig of this.pathConfigs) {
+      pathConfig.minHoldMs = min;
+      pathConfig.maxHoldMs = max;
+    }
   }
 
   /**
