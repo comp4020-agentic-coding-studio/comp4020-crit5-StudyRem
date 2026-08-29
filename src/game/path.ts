@@ -81,7 +81,7 @@ export class OperationSeries {
     // still stretch can never happen purely by unlucky rolls.
     const STAY_WEIGHT = 1;
     const MOVE_WEIGHT = 3;
-    const MAX_CONSECUTIVE_STAYS = 3;
+    const MAX_CONSECUTIVE_STAYS = 2;
     while (this.totalMs <= tMs) {
       const lastLane = this.segments[this.segments.length - 1].lane;
       const moves: number[] = [];

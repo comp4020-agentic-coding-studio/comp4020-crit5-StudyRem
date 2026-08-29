@@ -47,9 +47,9 @@ export interface SpawnerConfig {
 }
 
 export const DEFAULT_SPAWNER_CONFIG: SpawnerConfig = {
-  carSpeed: 220,
-  minSpawnGapMs: 500,
-  maxSpawnGapMs: 1100,
+  carSpeed: 260,
+  minSpawnGapMs: 900,
+  maxSpawnGapMs: 1800,
   minHoldMs: 1700,
   maxHoldMs: 2900,
 };
