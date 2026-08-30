@@ -14,20 +14,18 @@ of a run.
 
 ## The moment that mattered
 
-**The problem was my own prompt, not the code.** I asked for a
-"batch/random" traffic generator. What came back matched those words, but
-playing it showed cars still lining up into coincidental walls — nothing
-was ever scheduled together, several lanes' independent timers just
-happened to land close enough in time by chance. My first instinct was to
-keep iterating on the same idea: tweak a number, try again. That didn't
-help, because the real problem wasn't in the numbers — "batch" and
-"random" never pinned down the distribution precisely enough for either
-of us to land on the same thing. I only found the actual problem
-(coincidental clustering across independently-timed lanes) by playing the
-built game repeatedly, not by re-reading the prompt or the diff. Once I
-could name it, the fix was direct: an explicit global anti-bunching floor
-(a cluster limiter) plus generating spawns from a provably-reachable path
-instead of hoping a random draw left an opening.
+**The problem was in my prompt, not the code.** I asked for a "batch/random"
+traffic generator, and that's what I got — but playing it, cars still lined
+up into walls sometimes. Nothing was actually scheduled together, it's just
+that a few lanes' random timers happened to land close in time by chance. At
+first I kept tweaking the same numbers and re-running it, which didn't go
+anywhere, because "batch" and "random" were never specific enough for the AI
+and me to land on the same picture. I only spotted the real issue
+(independent lanes randomly clustering) by playing the game over and over,
+not by staring at the prompt or the diff again. Once I could name it, the fix
+was simple: a global anti-bunching gap (a cluster limiter), and generating
+spawns from a path that's already proven reachable instead of hoping a
+random roll leaves a gap.
 
 > the batch/random generation is working in a different way than I
 > thought though in the same way that word can tell
